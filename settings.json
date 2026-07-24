@@ -1,6 +1,6 @@
 {
-  "model": "wizard-vicuna-uncensored:latest",
-  "image_model": "realistic_vision",
+  "model": "dolphin-mistral:latest",
+  "image_model": "anything_v5",
   "models": [
     "dolphin-llama3:latest",
     "dolphin-mistral:latest",

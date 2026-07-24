@@ -30,6 +30,7 @@ def _sd15(
     label: str,
     repo: str,
     *,
+    style: str = "Default",
     negative_prompt: str = DEFAULT_SD15_NEGATIVE,
     vae: str | None = None,
     steps: int = 30,
@@ -37,6 +38,7 @@ def _sd15(
 ) -> dict:
     cfg: dict = {
         "label": label,
+        "style": style,
         "kind": "sd15",
         "repo": repo,
         "steps": steps,
@@ -55,46 +57,56 @@ IMAGE_MODELS: dict[str, dict] = {
     "sd15": _sd15(
         "SD 1.5 (Default)",
         "stable-diffusion-v1-5/stable-diffusion-v1-5",
+        style="Default",
     ),
     "realistic_vision": _sd15(
         "Realistic Vision (Photorealism & Real-World Photography)",
         "SG161222/Realistic_Vision_V5.1_noVAE",
+        style="Photo Realism",
         vae=SD15_VAE_MSE,
     ),
     "epicrealism": _sd15(
         "epiCRealism (Photorealism & Real-World Photography)",
         "emilianJR/epiCRealism",
+        style="Photo Realism",
     ),
     "photon": _sd15(
         "Photon (Photorealism & Real-World Photography)",
         "digiplay/Photon_v1",
+        style="Photo Realism",
     ),
     "dreamshaper8": _sd15(
         "DreamShaper 8 (Illustrative, Semi-Realism, & 2.5D)",
         "Lykon/dreamshaper-8",
+        style="Illustrations",
     ),
     "rev_animated": _sd15(
         "Rev Animated (Illustrative, Semi-Realism, & 2.5D)",
         "philz1337x/revanimated",
+        style="Illustrations",
         negative_prompt=DEFAULT_ANIME_NEGATIVE,
     ),
     "deliberate": _sd15(
         "Deliberate (Illustrative, Semi-Realism, & 2.5D)",
         "stablediffusionapi/deliberate-v2",
+        style="Illustrations",
     ),
     "anything_v5": _sd15(
         "Anything V5 (Anime, Manga, & Stylized Art)",
         "genai-archive/anything-v5",
+        style="Manga & Anime",
         negative_prompt=DEFAULT_ANIME_NEGATIVE,
     ),
     "ghostmix": _sd15(
         "GhostMix (Anime, Manga, & Stylized Art)",
         "digiplay/GhostMix",
+        style="Manga & Anime",
         negative_prompt=DEFAULT_ANIME_NEGATIVE,
     ),
     "counterfeit_v3": _sd15(
         "Counterfeit V3 (Anime, Manga, & Stylized Art)",
         "stablediffusionapi/counterfeit-v30",
+        style="Manga & Anime",
         negative_prompt=DEFAULT_ANIME_NEGATIVE,
     ),
 }
@@ -107,6 +119,17 @@ def image_model_keys() -> list[str]:
 def image_model_label(key: str) -> str:
     cfg = IMAGE_MODELS.get(key) or IMAGE_MODELS[DEFAULT_IMAGE_MODEL]
     return str(cfg["label"])
+
+
+def image_model_style(key: str) -> str:
+    """Short style tag shown under the image-model picker."""
+    cfg = IMAGE_MODELS.get(key) or IMAGE_MODELS[DEFAULT_IMAGE_MODEL]
+    return str(cfg.get("style") or "Default")
+
+
+def image_model_short_label(key: str) -> str:
+    """Model name without the parenthetical style suffix."""
+    return image_model_label(key).split(" (", 1)[0]
 
 
 def resolve_image_model(key: str | None) -> str:
