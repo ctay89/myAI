@@ -1,0 +1,9 @@
+{
+  "model": "wizard-vicuna-uncensored:latest",
+  "image_model": "realistic_vision",
+  "models": [
+    "dolphin-llama3:latest",
+    "dolphin-mistral:latest",
+    "wizard-vicuna-uncensored:latest"
+  ]
+}

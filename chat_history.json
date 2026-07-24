@@ -1,0 +1,10 @@
+{
+  "chats": [
+    {
+      "id": "b775beb4-fc80-4723-b618-b868adbb9a53",
+      "title": "New Chat",
+      "messages": []
+    }
+  ],
+  "active_id": "b775beb4-fc80-4723-b618-b868adbb9a53"
+}
