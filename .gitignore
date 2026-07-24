@@ -1,6 +1,6 @@
 .idea
 .venv
-generated
+generated/*
 __pycache__/
 *.log
 */*/log
