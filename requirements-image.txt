@@ -1,0 +1,10 @@
+# Install after requirements.txt
+# Install PyTorch separately for your platform:
+#   https://pytorch.org
+# Example (CUDA 12.4):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+
+diffusers==0.39.0
+transformers==5.14.1
+accelerate==1.14.0
+safetensors==0.8.0
