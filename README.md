@@ -1,4 +1,4 @@
-# chuckAI (myAI)
+# YourTalesAI (myAI)
 
 Local Streamlit chat app backed by [Ollama](https://ollama.com), with optional local Stable Diffusion image generation/editing via Hugging Face diffusers.
 

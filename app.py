@@ -9,27 +9,35 @@ from pathlib import Path
 import ollama
 import streamlit as st
 import streamlit.components.v1 as components
-from PIL import Image as PILImage
 
 import image_gen as _image_gen
 
 # Streamlit can keep a stale image_gen in memory after edits; refresh if needed
 if (
-    not hasattr(_image_gen, "edit_image")
+    not hasattr(_image_gen, "generate_image")
     or not hasattr(_image_gen, "IMAGE_MODELS")
     or not hasattr(_image_gen, "image_model_style")
 ):
     _image_gen = importlib.reload(_image_gen)
 
-edit_image = _image_gen.edit_image
 generate_image = _image_gen.generate_image
 clear_image_pipelines = _image_gen.clear_image_pipelines
 image_model_keys = _image_gen.image_model_keys
 image_model_label = _image_gen.image_model_label
 image_model_style = _image_gen.image_model_style
-image_model_short_label = _image_gen.image_model_short_label
 resolve_image_model = _image_gen.resolve_image_model
 DEFAULT_IMAGE_MODEL = _image_gen.DEFAULT_IMAGE_MODEL
+
+STORY_PHASES = ("premise", "appearances", "start", "writing")
+
+APPEARANCES_ASK = (
+    "Great premise. Describe how the main characters (and any important creatures "
+    "or places) should look — or say **generic** if you want me to invent their "
+    "appearances."
+)
+START_ASK = (
+    "Where should we begin? Tell me the opening moment or place to start the story."
+)
 
 DEFAULT_MODEL = "dolphin-llama3"
 # Only these chat models are offered in the picker
@@ -44,7 +52,20 @@ IMAGE_DIR = Path(__file__).parent / "generated"
 ASSETS_DIR = Path(__file__).parent / "assets"
 AVATAR_USER = ASSETS_DIR / "avatar_user.png"
 AVATAR_ASSISTANT = ASSETS_DIR / "avatar_assistant.png"
-LOGO_FILE = ASSETS_DIR / "chuckai_logo.png"
+ICON_FILE = ASSETS_DIR / "mascot_rabbit.png"
+if not ICON_FILE.exists():
+    ICON_FILE = ASSETS_DIR / "robot_clean.png"
+LOGO_FILE = ASSETS_DIR / "yourtalesai_logo.png"
+# Fall back to legacy mark if the new logo is missing
+if not LOGO_FILE.exists():
+    LOGO_FILE = ASSETS_DIR / "chuckai_logo.png"
+CHAT_BG_FILE = ASSETS_DIR / "chat_bg_forest.png"
+APP_NAME = "YourTalesAI"
+
+st.set_page_config(
+    page_title=APP_NAME,
+    page_icon=str(ICON_FILE) if ICON_FILE.exists() else None,
+)
 
 
 def chat_avatar(role: str) -> str | None:
@@ -195,16 +216,50 @@ def set_preferred_image_model(model_key: str) -> None:
     )
 
 
-def _new_chat(title: str = "New Chat", messages: list[dict] | None = None) -> dict:
+def default_story() -> dict:
+    return {
+        "phase": "premise",
+        "premise": "",
+        "appearances": "",
+        "start_point": "",
+    }
+
+
+def ensure_story(chat: dict) -> dict:
+    """Attach / migrate per-story phase metadata on a chat dict."""
+    story = chat.get("story")
+    if not isinstance(story, dict):
+        msgs = chat.get("messages") or []
+        has_user = any(m.get("role") == "user" for m in msgs)
+        has_asst = any(m.get("role") == "assistant" for m in msgs)
+        story = default_story()
+        if has_user and has_asst:
+            story["phase"] = "writing"
+            for message in msgs:
+                if message.get("role") == "user":
+                    story["premise"] = (message.get("content") or "").strip()
+                    break
+        chat["story"] = story
+    else:
+        if story.get("phase") not in STORY_PHASES:
+            story["phase"] = "premise"
+        for key in ("premise", "appearances", "start_point"):
+            story.setdefault(key, "")
+        chat["story"] = story
+    return chat["story"]
+
+
+def _new_chat(title: str = "New Story", messages: list[dict] | None = None) -> dict:
     return {
         "id": str(uuid.uuid4()),
         "title": title,
         "messages": messages or [],
+        "story": default_story(),
     }
 
 
 def load_store() -> dict:
-    """Load multi-chat store. Migrates old flat message list if needed."""
+    """Load multi-story store. Migrates old flat message list if needed."""
     if not HISTORY_FILE.exists():
         return {"chats": [], "active_id": None}
 
@@ -213,29 +268,31 @@ def load_store() -> dict:
     except (json.JSONDecodeError, OSError):
         return {"chats": [], "active_id": None}
 
+    chats: list[dict] = []
+    active_id = None
+
     # Old format: flat list of {role, content}
     if isinstance(data, list):
         if data and "role" in data[0]:
             title = next(
                 (m["content"] for m in data if m.get("role") == "user"),
-                "New Chat",
+                "New Story",
             )
             chat = _new_chat(title=_title_from(title), messages=data)
-            return {"chats": [chat], "active_id": chat["id"]}
-        if data and "id" in data[0] and "messages" in data[0]:
-            return {
-                "chats": data,
-                "active_id": data[0]["id"],
-            }
-        return {"chats": [], "active_id": None}
+            chats = [chat]
+            active_id = chat["id"]
+        elif data and "id" in data[0] and "messages" in data[0]:
+            chats = data
+            active_id = data[0]["id"]
+    elif isinstance(data, dict) and "chats" in data:
+        chats = data.get("chats") or []
+        active_id = data.get("active_id")
 
-    if isinstance(data, dict) and "chats" in data:
-        return {
-            "chats": data.get("chats") or [],
-            "active_id": data.get("active_id"),
-        }
+    for chat in chats:
+        if isinstance(chat, dict):
+            ensure_story(chat)
 
-    return {"chats": [], "active_id": None}
+    return {"chats": chats, "active_id": active_id}
 
 
 def save_store(chats: list[dict], active_id: str | None) -> None:
@@ -252,7 +309,7 @@ def save_store(chats: list[dict], active_id: str | None) -> None:
 def _title_from(text: str, max_len: int = 40) -> str:
     text = " ".join(text.strip().split())
     if len(text) <= max_len:
-        return text or "New Chat"
+        return text or "New Story"
     return text[: max_len - 1] + "…"
 
 
@@ -261,9 +318,9 @@ def _merge_truncated_title(title: str, fragment: str) -> str:
     title = (title or "").strip()
     fragment = " ".join((fragment or "").strip().split())
     if not title and not fragment:
-        return "New Chat"
+        return "New Story"
     if not fragment:
-        return title.rstrip("…").rstrip("...").strip() or "New Chat"
+        return title.rstrip("…").rstrip("...").strip() or "New Story"
     if not title:
         return fragment
 
@@ -315,13 +372,13 @@ def chat_full_prompt(chat: dict) -> str:
         chat["title_full"] = best
     elif not stored and best:
         chat["title_full"] = best
-    return best or stored or first or title or "New Chat"
+    return best or stored or first or title or "New Story"
 
 
 def set_chat_title(chat: dict, text: str) -> None:
     """Set truncated sidebar title and keep the full prompt for hover tooltips."""
     cleaned = " ".join((text or "").strip().split())
-    chat["title_full"] = cleaned or "New Chat"
+    chat["title_full"] = cleaned or "New Story"
     chat["title"] = _title_from(cleaned)
 
 
@@ -405,7 +462,7 @@ def clear_all_chats() -> None:
 
 def _clear_history_dialog_body() -> None:
     st.markdown(
-        "You are about to delete all Chats.  Are you sure you want to do that?"
+        "You are about to delete all Stories. Are you sure you want to do that?"
     )
     col_ok, col_cancel = st.columns(2)
     with col_ok:
@@ -430,7 +487,7 @@ def _clear_history_dialog_body() -> None:
 
 if hasattr(st, "dialog"):
 
-    @st.dialog("Clear chat history")
+    @st.dialog("Clear story history")
     def show_clear_history_confirmation() -> None:
         _clear_history_dialog_body()
 
@@ -439,7 +496,7 @@ else:
     def show_clear_history_confirmation() -> None:
         with st.sidebar:
             st.warning(
-                "You are about to delete all Chats.  Are you sure you want to do that?"
+                "You are about to delete all Stories. Are you sure you want to do that?"
             )
             _clear_history_dialog_body()
 
@@ -449,18 +506,79 @@ def persist() -> None:
 
 
 SYSTEM_PROMPT = (
-    "You are chuckAI, a helpful assistant. Use the full conversation history "
-    "in this chat to answer follow-up questions. Resolve references like "
-    '"it", "that", "the story", "them", and earlier topics using prior turns. '
-    "Stay consistent with what was already said in this conversation."
+    "You are YourTalesAI, a short-story collaborator. Write vivid prose in exactly "
+    "3–5 paragraphs per scene. Stay consistent with the premise, character "
+    "appearances, and prior scenes. When continuing, pick up exactly where the "
+    "last scene left off and weave in the user's new direction. Write only story "
+    "prose — no titles, preambles, meta commentary, or questions."
 )
 
 
-def ollama_messages(messages: list[dict], *, include_system: bool = True) -> list[dict]:
-    """Build the message list for Ollama, including prior turns in this chat."""
+def wants_generic_appearances(text: str) -> bool:
+    lower = (text or "").strip().lower()
+    if not lower:
+        return True
+    if lower in {
+        "generic",
+        "default",
+        "whatever",
+        "you decide",
+        "you choose",
+        "n/a",
+        "na",
+        "-",
+    }:
+        return True
+    return bool(
+        re.search(
+            r"\b(generic|default|whatever|you (decide|choose|pick|invent)|"
+            r"up to you|don'?t care|no preference|surprise me)\b",
+            lower,
+        )
+    )
+
+
+def story_system_prompt(chat: dict) -> str:
+    """System prompt plus the story bible for consistency across scenes."""
+    story = ensure_story(chat)
+    parts = [SYSTEM_PROMPT]
+    premise = (story.get("premise") or "").strip()
+    appearances = (story.get("appearances") or "").strip()
+    start_point = (story.get("start_point") or "").strip()
+    if premise:
+        parts.append(f"Premise:\n{premise}")
+    if appearances:
+        if wants_generic_appearances(appearances):
+            parts.append(
+                "Appearances:\nInvent fitting, consistent looks for characters "
+                "and key places; keep them stable across scenes."
+            )
+        else:
+            parts.append(f"Appearances:\n{appearances}")
+    if start_point:
+        parts.append(f"Opening start point:\n{start_point}")
+    return "\n\n".join(parts)
+
+
+def story_input_placeholder(phase: str) -> str:
+    return {
+        "premise": "Describe your story idea…",
+        "appearances": "Describe characters, or say generic…",
+        "start": "Where should the story begin?",
+        "writing": "Continue, or steer the story…",
+    }.get(phase, "Describe your story idea…")
+
+
+def ollama_messages(
+    messages: list[dict],
+    *,
+    include_system: bool = True,
+    system_prompt: str | None = None,
+) -> list[dict]:
+    """Build the message list for Ollama, including prior turns in this story."""
     out: list[dict] = []
     if include_system:
-        out.append({"role": "system", "content": SYSTEM_PROMPT})
+        out.append({"role": "system", "content": system_prompt or SYSTEM_PROMPT})
 
     for m in messages:
         role = m.get("role")
@@ -477,131 +595,50 @@ def ollama_messages(messages: list[dict], *, include_system: bool = True) -> lis
     return out
 
 
-def chat_completion(messages: list[dict], model: str) -> str:
-    """Non-streaming chat reply using full conversation history."""
+def chat_completion(
+    messages: list[dict],
+    model: str,
+    *,
+    system_prompt: str | None = None,
+) -> str:
+    """Non-streaming reply using full conversation history."""
     response = ollama.chat(
         model=model,
-        messages=ollama_messages(messages),
+        messages=ollama_messages(messages, system_prompt=system_prompt),
         stream=False,
     )
     return (response.message.content or "").strip()
 
 
-def is_referential_image_prompt(prompt: str) -> bool:
-    """True when the image ask likely refers to earlier chat, not a full scene."""
-    lower = prompt.strip().lower()
-    if not lower:
-        return False
-    if re.search(
-        r"\b(the story|that scene|this story|those characters?|the characters?|"
-        r"from (the |our )?story|based on|as described|what (we|i) (said|wrote|described)|"
-        r"the (archer|mage|tavern|dungeon))\b",
-        lower,
-    ):
-        return True
-    # Short / vague subjects: "the story", "them", "that"
-    if len(lower.split()) <= 5 and re.search(
-        r"\b(it|that|this|them|him|her|those|these|same|previous|earlier|story|scene)\b",
-        lower,
-    ):
-        return True
-    return False
-
-
-def expand_image_prompt_from_history(
-    messages: list[dict], image_prompt: str, model: str
-) -> str:
-    """Turn a vague/referential image request into a concrete prompt via chat history."""
-    expand_msgs = ollama_messages(messages) + [
-        {
-            "role": "user",
-            "content": (
-                "Based on our conversation above, write one detailed image-generation "
-                f"prompt for this request: {image_prompt!r}\n\n"
-                "Reply with ONLY the image prompt — no quotes or explanation. "
-                "Include subject, setting, mood, and important visual details from the chat."
-            ),
-        }
-    ]
-    try:
-        response = ollama.chat(model=model, messages=expand_msgs, stream=False)
-        expanded = (response.message.content or "").strip().strip('"').strip("'")
-        # Drop accidental preamble if the model adds one
-        if "\n" in expanded:
-            expanded = expanded.split("\n")[0].strip().strip('"').strip("'")
-        return expanded or image_prompt
-    except Exception:
-        return image_prompt
-
-
-def chat_request_inside_image_prompt(image_prompt: str) -> str | None:
-    """
-    If '/image …' / 'show …' text also asks for writing (e.g. '…and tell a story'),
-    return the chat/writing portion so we can do both image + text.
-    """
-    stripped = image_prompt.strip().lstrip(",").strip()
-    if not stripped:
-        return None
-    lower = stripped.lower()
-
-    # Writing ask at the start: "and tell a story…", "continue the story…"
-    write_start = (
-        r"tell(\s+me)?(\s+a|\s+an)?\s+(story|tale|narrative)\b|"
-        r"tell\s+me\b|"
-        r"continue(\s+(with\s+)?(the\s+)?)?(story|tale|narrative|it)?\b|"
-        r"finish(\s+(the\s+)?)?(story|tale|narrative)\b|"
-        r"keep\s+going(\s+with\s+(the\s+)?(story|tale|narrative))?\b|"
-        r"pick\s+up(\s+(the\s+)?)?(story|tale|narrative)\b|"
-        r"resume(\s+(the\s+)?)?(story|tale|narrative)\b|"
-        r"go\s+on(\s+with\s+(the\s+)?(story|tale|narrative))?\b|"
-        r"write\b|"
-        r"explain\b|"
-        r"describe\b|"
-        r"summarize\b|"
-        r"give\s+me\s+(a\s+|an\s+)?(story|narrative|tale)\b|"
-        r"narrate\b"
-    )
-    if re.match(rf"^(and\s+)?({write_start})", lower):
-        return re.sub(r"^and\s+", "", stripped, flags=re.IGNORECASE).strip()
-
-    # Subject then writing: "a space marine and tell a story"
-    mid = re.search(rf"(?:^|[\s,;]+(?:and|,)\s+)({write_start}.*)$", lower)
-    if mid:
-        chat = stripped[mid.start(1) :].strip()
-        subject = stripped[: mid.start(1)].strip()
-        subject = re.sub(
-            r"[\s,;]*\band\b[\s,;]*$", "", subject, flags=re.IGNORECASE
-        ).strip(" ,;")
-        # Don't invent "about X" for continuations / vague story asks
-        is_continue = bool(
-            re.match(
-                r"^(continue|finish|keep\s+going|pick\s+up|resume|go\s+on)\b",
-                chat.lower(),
-            )
+def write_story_scene(chat: dict, model: str, *, opening: bool) -> str:
+    """Generate the next 3–5 paragraph scene for this story."""
+    if opening:
+        nudge = (
+            "Write the opening scene now in exactly 3–5 paragraphs, starting from "
+            "the opening start point. Only story prose."
         )
-        if (
-            subject
-            and not is_continue
-            and not re.search(r"\babout\b", chat, flags=re.IGNORECASE)
-        ):
-            chat = f"{chat} about {subject}"
-        return chat
-
-    if len(stripped) > 100 and is_likely_chat(stripped):
-        return stripped
-    return None
+    else:
+        nudge = (
+            "Continue from where the last scene ended in exactly 3–5 paragraphs, "
+            "following my latest direction. Only story prose."
+        )
+    # Ephemeral writing instruction — not stored in chat history
+    msgs = list(chat["messages"]) + [{"role": "user", "content": nudge}]
+    return chat_completion(
+        msgs, model, system_prompt=story_system_prompt(chat)
+    )
 
 
 def scene_prompt_from_story(messages: list[dict], story_request: str, model: str) -> str:
-    """Build a concise image-generation prompt that matches the story request."""
+    """Build a concise image-generation prompt that matches the story scene."""
     expand_msgs = ollama_messages(messages) + [
         {
             "role": "user",
             "content": (
                 "Write one detailed image-generation prompt that illustrates the main "
-                "scene from this story request. Focus on characters, setting, mood, "
-                "and key visual details — not the full plot.\n\n"
-                f"Story request:\n{story_request}\n\n"
+                "moment from this scene. Focus on characters, setting, mood, and key "
+                "visual details — not the full plot.\n\n"
+                f"{story_request}\n\n"
                 "Reply with ONLY the image prompt — no quotes or explanation."
             ),
         }
@@ -616,80 +653,35 @@ def scene_prompt_from_story(messages: list[dict], story_request: str, model: str
         return story_request[:200]
 
 
-def parse_image_prompt(text: str) -> str | None:
+def illustrate_scene(
+    chat: dict, scene_text: str, model: str
+) -> tuple[object | None, str | None, str, Exception | None]:
     """
-    Return the image subject if this looks like a *new* image request, else None.
+    Create a scene illustration.
 
-    Supports `/image …` and any prompt that begins with "show"
-    (including "show me…", "show a picture…", etc.).
+    Returns (pil_image_or_none, relative_path_or_none, draw_prompt, error_or_none).
     """
-    stripped = text.strip()
-    lower = stripped.lower()
+    story = ensure_story(chat)
+    appearances = (story.get("appearances") or "").strip() or "generic"
+    if wants_generic_appearances(appearances):
+        appearance_note = "Invent fitting character and setting looks."
+    else:
+        appearance_note = appearances
 
-    # Longer / more specific patterns first; bare "show …" last
-    prefixes = [
-        r"^/image\s*",
-        r"^show\s+me\s+(?:a\s+|an\s+)?(?:picture|image|photo)\s*(?:of\s+)?",
-        r"^show\s+(?:a\s+|an\s+)?(?:picture|image|photo)\s*(?:of\s+)?",
-        r"^show\s+me\s+",
-        r"^show\s+",
-    ]
-    for pattern in prefixes:
-        match = re.match(pattern, lower)
-        if match:
-            return stripped[match.end() :].strip()
-    return None
-
-
-def parse_image_edit_prompt(text: str) -> str | None:
-    """Return edit instruction if this looks like an image-edit request."""
-    stripped = text.strip()
-    lower = stripped.lower()
-    prefixes = [
-        r"^/edit\s*",
-        r"^change\s+",
-        r"^make\s+it\s+",
-        r"^make\s+the\s+",
-        r"^edit\s+",
-        r"^modify\s+",
-        r"^update\s+(?:the\s+)?image\s*(?:to\s+|with\s+)?",
-        r"^regenerate\s+(?:it\s+)?(?:with\s+|as\s+)?",
-        r"^redo\s+(?:it\s+)?(?:with\s+|as\s+)?",
-        r"^add\s+",
-        r"^remove\s+",
-        r"^replace\s+",
-        r"^now\s+make\s+",
-        r"^can\s+you\s+(?:change|edit|modify|add|remove)\s+",
-    ]
-    for pattern in prefixes:
-        match = re.match(pattern, lower)
-        if match:
-            rest = stripped[match.end() :].strip()
-            # Keep full natural phrasing for img2img; fall back to whole text
-            return rest or stripped
-    return None
-
-
-def is_likely_chat(text: str) -> bool:
-    """Heuristic: treat questions / chatty asks as LLM chat, not image edits."""
-    lower = text.strip().lower()
-    if "?" in lower:
-        return True
-    return bool(
-        re.match(
-            r"^(what|why|how|who|when|where|explain|summarize|write|"
-            r"tell me (?!about the image)|do you|can you (?:explain|tell|help|write|say)|"
-            r"please (?:explain|tell|write))\b",
-            lower,
+    draw_prompt = ""
+    try:
+        draw_prompt = scene_prompt_from_story(
+            chat["messages"],
+            f"Appearances:\n{appearance_note}\n\nScene to illustrate:\n{scene_text}",
+            model,
         )
-    )
-
-
-def last_image_message(messages: list[dict]) -> dict | None:
-    for message in reversed(messages):
-        if message.get("role") == "assistant" and message.get("image"):
-            return message
-    return None
+        image = generate_image(
+            draw_prompt,
+            model_key=st.session_state.image_model,
+        )
+        return image, save_generated_image(image, draw_prompt), draw_prompt, None
+    except Exception as e:
+        return None, None, draw_prompt, e
 
 
 def save_generated_image(image, prompt: str) -> str:
@@ -714,9 +706,33 @@ def render_message(message: dict) -> None:
         st.markdown(message["content"])
 
 
+def append_assistant_message(
+    chat: dict,
+    content: str,
+    *,
+    image: str | None = None,
+    image_prompt: str = "",
+) -> dict:
+    msg: dict = {"role": "assistant", "content": content}
+    if image:
+        msg["image"] = image
+        if image_prompt:
+            msg["image_prompt"] = image_prompt
+    chat["messages"].append(msg)
+    return msg
+
+
+def sync_chat_title(active: dict, text: str) -> None:
+    set_chat_title(active, text)
+    for chat in st.session_state.chats:
+        if chat["id"] == active["id"]:
+            set_chat_title(chat, text)
+            break
+
+
 def install_sidebar_logo_tooltip(
-    full_text: str = "chuckAI - Ask me anything?",
-    icon_text: str = "Ask me anything?",
+    full_text: str = f"{APP_NAME} - How can we start your story today?",
+    icon_text: str = "How can we start your story today?",
 ) -> None:
     """Native title tooltips on sidebar / header logos (full mark + little robot)."""
     components.html(
@@ -745,7 +761,7 @@ def install_sidebar_logo_tooltip(
               doc.querySelector('[data-testid="stSidebarLogo"]')
             ].forEach(function (el) {{ setTip(el, fullTip); }});
 
-            // Little robot in collapsed sidebar / app header (icon_image)
+            // Little mascot in collapsed sidebar / app header (icon_image)
             [
               doc.querySelector('[data-testid="stHeader"] [data-testid="stLogo"]'),
               doc.querySelector('[data-testid="stHeader"] [data-testid="stLogoLink"]'),
@@ -1038,29 +1054,190 @@ def install_scroll_controls(*, force_bottom: bool = False) -> None:
     )
 
 
+
+
 if LOGO_FILE.exists():
     _logo_kwargs: dict = {"size": "medium"}
-    _icon = ASSETS_DIR / "robot_clean.png"
-    if _icon.exists():
-        _logo_kwargs["icon_image"] = str(_icon)
+    if ICON_FILE.exists():
+        _logo_kwargs["icon_image"] = str(ICON_FILE)
     st.logo(str(LOGO_FILE), **_logo_kwargs)
     install_sidebar_logo_tooltip()
     _logo_b64 = base64.b64encode(LOGO_FILE.read_bytes()).decode("ascii")
     st.markdown(
         f'<div class="chuckai-hero">'
         f'<img src="data:image/png;base64,{_logo_b64}" '
-        f'alt="chuckAI" width="220" />'
-        f'<p class="chuckai-tagline">Ask me anything?</p>'
+        f'alt="{APP_NAME}" width="280" />'
+        f'<p class="chuckai-tagline">How can we start your story today?</p>'
         f"</div>",
         unsafe_allow_html=True,
     )
 else:
     st.markdown(
-        '<div class="chuckai-hero">'
-        "<h1>chuckAI</h1>"
-        '<p class="chuckai-tagline">Ask me anything?</p>'
-        "</div>",
+        f'<div class="chuckai-hero">'
+        f"<h1>YourTales<span>AI</span></h1>"
+        f'<p class="chuckai-tagline">How can we start your story today?</p>'
+        f"</div>",
         unsafe_allow_html=True,
+    )
+
+_chat_bg_css = ""
+if CHAT_BG_FILE.exists():
+    _bg_b64 = base64.b64encode(CHAT_BG_FILE.read_bytes()).decode("ascii")
+    _bg_url = f"url(\"data:image/png;base64,{_bg_b64}\")"
+    _forest_fill = (
+        f"linear-gradient(rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.55)), "
+        f"{_bg_url}"
+    )
+    _chat_bg_css = f"""
+    <style>
+    /* Washed-out forest backdrop behind the chat */
+    .stApp {{
+        background-image: {_bg_url} !important;
+        background-size: cover !important;
+        background-position: center center !important;
+        background-repeat: no-repeat !important;
+        background-attachment: fixed !important;
+    }}
+    [data-testid="stAppViewContainer"],
+    [data-testid="stMain"],
+    .main,
+    .main .block-container,
+    [data-testid="stMainBlockContainer"],
+    section.main {{
+        background: transparent !important;
+        background-color: transparent !important;
+    }}
+    [data-testid="stHeader"] {{
+        background: transparent !important;
+        background-color: transparent !important;
+        background-image: none !important;
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+        border-bottom: none !important;
+        box-shadow: none !important;
+    }}
+    [data-testid="stHeader"] > div,
+    [data-testid="stToolbar"],
+    [data-testid="stDecoration"],
+    [data-testid="stStatusWidget"],
+    header[data-testid="stHeader"] {{
+        background: transparent !important;
+        background-color: transparent !important;
+        background-image: none !important;
+        box-shadow: none !important;
+    }}
+    /* Bottom dock: no solid white bar */
+    [data-testid="stBottom"],
+    [data-testid="stBottom"] > div,
+    [data-testid="stBottomBlockContainer"],
+    [data-testid="stBottomBlockContainer"] > div,
+    .stBottomBlockContainer,
+    [data-testid="stChatInputContainer"],
+    [data-testid="stChatInputContainer"] > div {{
+        background: transparent !important;
+        background-color: transparent !important;
+        background-image: none !important;
+        box-shadow: none !important;
+    }}
+    /* Prompt box shell gets the forest; inner layers stay clear */
+    [data-testid="stChatInput"] {{
+        min-height: 6.5rem !important;
+        align-items: stretch !important;
+        overflow: hidden !important;
+        border-radius: 0.85rem !important;
+        background-image: {_forest_fill} !important;
+        background-size: cover !important;
+        background-position: center bottom !important;
+        background-repeat: no-repeat !important;
+        background-color: transparent !important;
+    }}
+    [data-testid="stChatInput"] *,
+    [data-testid="stChatInput"] > div,
+    [data-testid="stChatInput"] div[data-baseweb="base-input"],
+    [data-testid="stChatInput"] [data-baseweb="textarea"],
+    [data-testid="stChatInput"] textarea {{
+        background: transparent !important;
+        background-color: transparent !important;
+        background-image: none !important;
+    }}
+    [data-testid="stChatInput"] textarea {{
+        min-height: 5.25rem !important;
+        height: 5.25rem !important;
+        max-height: 12rem !important;
+        line-height: 1.45 !important;
+        padding-top: 0.65rem !important;
+        padding-bottom: 0.65rem !important;
+        resize: vertical !important;
+        overflow-y: auto !important;
+        color: #1a2b32 !important;
+        caret-color: #1a2b32 !important;
+    }}
+    [data-testid="stChatInput"] textarea::placeholder {{
+        color: #5a7380 !important;
+        opacity: 0.9 !important;
+    }}
+    /* If Streamlit paints the textarea opaque, stamp forest there too */
+    [data-testid="stChatInput"] textarea {{
+        background-image: {_forest_fill} !important;
+        background-size: cover !important;
+        background-position: center bottom !important;
+        background-repeat: no-repeat !important;
+    }}
+    </style>
+    """
+    st.markdown(_chat_bg_css, unsafe_allow_html=True)
+    _bg_data_url = f"data:image/png;base64,{_bg_b64}"
+    components.html(
+        f"""
+        <script>
+        (function () {{
+          var BG = {json.dumps(_bg_data_url)};
+          var FILL = 'linear-gradient(rgba(255,255,255,0.55), rgba(255,255,255,0.55)), url(\"' + BG + '\")';
+          function paint() {{
+            var doc = window.parent.document;
+            var header = doc.querySelector('[data-testid="stHeader"]');
+            if (header) {{
+              header.style.setProperty('background', 'transparent', 'important');
+              header.style.setProperty('background-color', 'transparent', 'important');
+              header.style.setProperty('background-image', 'none', 'important');
+              header.style.setProperty('box-shadow', 'none', 'important');
+            }}
+            var bottom = doc.querySelector('[data-testid="stBottom"]');
+            if (bottom) {{
+              bottom.style.setProperty('background', 'transparent', 'important');
+              bottom.style.setProperty('background-color', 'transparent', 'important');
+            }}
+            var box = doc.querySelector('[data-testid="stChatInput"]');
+            if (!box) return;
+            box.style.setProperty('background-image', FILL, 'important');
+            box.style.setProperty('background-size', 'cover', 'important');
+            box.style.setProperty('background-position', 'center bottom', 'important');
+            box.style.setProperty('background-color', 'transparent', 'important');
+            box.style.setProperty('min-height', '6.5rem', 'important');
+            var nodes = box.querySelectorAll('div, textarea');
+            nodes.forEach(function (el) {{
+              el.style.setProperty('background-color', 'transparent', 'important');
+              if (el.tagName === 'TEXTAREA') {{
+                el.style.setProperty('background-image', FILL, 'important');
+                el.style.setProperty('background-size', 'cover', 'important');
+                el.style.setProperty('background-position', 'center bottom', 'important');
+                el.style.setProperty('min-height', '5.25rem', 'important');
+              }} else {{
+                el.style.setProperty('background-image', 'none', 'important');
+              }}
+            }});
+          }}
+          paint();
+          var doc = window.parent.document;
+          if (!window.parent.__yourTalesChatBgObs) {{
+            window.parent.__yourTalesChatBgObs = new MutationObserver(function () {{ paint(); }});
+            window.parent.__yourTalesChatBgObs.observe(doc.body, {{ childList: true, subtree: true }});
+          }}
+        }})();
+        </script>
+        """,
+        height=0,
+        width=0,
     )
 
 st.markdown(
@@ -1101,12 +1278,15 @@ st.markdown(
         display: flex !important;
         align-items: center !important;
     }
-    /* Compact chuckAI mark inline with the sidebar collapse control */
+    /* Compact YourTalesAI mark inline with the sidebar collapse control */
     [data-testid="stSidebarHeader"] [data-testid="stLogo"],
     [data-testid="stSidebarHeader"] [data-testid="stSidebarLogo"],
     [data-testid="stSidebarHeader"] [data-testid="stSidebarCollapseButton"] {
         display: flex !important;
         align-items: center !important;
+        background: transparent !important;
+        box-shadow: none !important;
+        border: none !important;
     }
     [data-testid="stSidebarHeader"] [data-testid="stLogo"] img,
     [data-testid="stSidebarHeader"] [data-testid="stSidebarLogo"] img,
@@ -1115,6 +1295,14 @@ st.markdown(
         height: 1.65rem !important;
         width: auto !important;
         object-fit: contain !important;
+        background: transparent !important;
+    }
+    [data-testid="stLogo"],
+    [data-testid="stSidebarLogo"],
+    [data-testid="stLogo"] a,
+    [data-testid="stSidebarLogo"] a {
+        background: transparent !important;
+        box-shadow: none !important;
     }
     [data-testid="stSidebarContent"] {
         padding: 0.35rem 0.85rem 1rem 0.85rem !important;
@@ -1672,14 +1860,15 @@ st.markdown(
         justify-content: center !important;
         text-align: center !important;
         width: 100% !important;
-        margin: 0.15rem 0 0.85rem 0 !important;
+        margin: 0.15rem 0 0.5rem 0 !important;
         padding: 0 !important;
+        gap: 0.15rem !important;
     }
     .chuckai-hero img {
         display: block !important;
         margin: 0 auto !important;
         background: transparent !important;
-        max-width: 220px !important;
+        max-width: 280px !important;
         height: auto !important;
     }
     .chuckai-hero h1 {
@@ -1688,8 +1877,11 @@ st.markdown(
         font-size: 1.85rem !important;
         font-weight: 700 !important;
     }
+    .chuckai-hero h1 span {
+        color: var(--nav-accent) !important;
+    }
     .chuckai-tagline {
-        margin: 0.4rem 0 0 0 !important;
+        margin: 0 !important;
         padding: 0 !important;
         color: var(--nav-muted) !important;
         font-size: 1.05rem !important;
@@ -1729,6 +1921,7 @@ st.markdown(
         border-color: #6a7a82 !important;
         box-shadow: none !important;
         outline: none !important;
+        border-radius: 0.85rem !important;
     }
     [data-testid="stChatInput"]:focus,
     [data-testid="stChatInput"]:focus-within {
@@ -1738,6 +1931,17 @@ st.markdown(
     }
     [data-testid="stChatInput"] > div {
         border-color: #55656d !important;
+        background: transparent !important;
+        background-color: transparent !important;
+    }
+    /* Fallback height if forest bg CSS did not load */
+    [data-testid="stChatInput"] textarea {
+        min-height: 5.25rem !important;
+    }
+    [data-testid="stBottom"],
+    [data-testid="stBottomBlockContainer"] {
+        background: transparent !important;
+        background-color: transparent !important;
     }
 
     /* Smaller chat avatars */
@@ -1772,7 +1976,7 @@ st.markdown(
     #chuckai-scroll-bottom {
         position: fixed !important;
         right: 1.35rem !important;
-        bottom: 5.75rem !important;
+        bottom: 8.25rem !important;
         z-index: 2147483647 !important;
         width: 2.55rem !important;
         height: 2.55rem !important;
@@ -1836,8 +2040,9 @@ for chat in st.session_state.chats:
     full = chat_full_prompt(chat)
     if full:
         chat["title_full"] = full
-    if chat.get("title") in ("New Chat", "New chat", "", None) and chat.get("title_full"):
+    if chat.get("title") in ("New Chat", "New chat", "New Story", "New story", "", None) and chat.get("title_full"):
         chat["title"] = _title_from(chat["title_full"])
+    ensure_story(chat)
 
 if "chats_visible" not in st.session_state:
     st.session_state.chats_visible = True
@@ -1870,7 +2075,7 @@ history_path = str(HISTORY_FILE.resolve())
 
 with st.sidebar:
     if st.button(
-        "＋ START NEW CHAT",
+        "＋ START NEW STORY",
         key="nav_new_chat",
         use_container_width=True,
     ):
@@ -1880,7 +2085,7 @@ with st.sidebar:
         persist()
         st.rerun()
 
-    st.markdown('<p class="nav-label">Chats</p>', unsafe_allow_html=True)
+    st.markdown('<p class="nav-label">Stories</p>', unsafe_allow_html=True)
 
     try:
         _chat_box = st.container(key="nav_chats")
@@ -1890,7 +2095,7 @@ with st.sidebar:
     with _chat_box:
         for chat in list(st.session_state.chats):
             is_active = chat["id"] == st.session_state.active_id
-            title = chat["title"] or "New Chat"
+            title = chat["title"] or "New Story"
             full_prompt = chat_full_prompt(chat)
             if full_prompt:
                 nav_tips[chat["id"]] = full_prompt
@@ -1917,7 +2122,7 @@ with st.sidebar:
     install_nav_chat_tooltips(nav_tips)
 
     if st.button(
-        "CLEAR CHAT HISTORY",
+        "CLEAR STORY HISTORY",
         key="nav_clear_history",
         use_container_width=True,
         help=history_path,
@@ -1936,7 +2141,7 @@ with st.sidebar:
     except TypeError:
         _model_box = st.container()
     with _model_box:
-        st.markdown('<p class="nav-label">Chat model</p>', unsafe_allow_html=True)
+        st.markdown('<p class="nav-label">Story model</p>', unsafe_allow_html=True)
         options = _dedupe_models(available_models + [st.session_state.model])
         try:
             current_index = options.index(st.session_state.model)
@@ -1975,7 +2180,7 @@ with st.sidebar:
                 "image_model",
                 image_keys,
                 index=image_index,
-                format_func=image_model_short_label,
+                format_func=image_model_label,
                 label_visibility="collapsed",
                 key="sidebar_image_model",
             )
@@ -1989,246 +2194,101 @@ with st.sidebar:
             )
 
 active = get_active_chat()
+if active:
+    ensure_story(active)
 messages = active["messages"] if active else []
+story_phase = ensure_story(active)["phase"] if active else "premise"
 
 for message in messages:
     render_message(message)
 
-prompt = st.chat_input(
-    'Chat, "show me a dolphin", or after an image: "make it jumping"'
-)
+prompt = st.chat_input(story_input_placeholder(story_phase))
+
+
+def _write_and_illustrate(chat: dict, *, opening: bool) -> None:
+    """Write a scene, illustrate it, show it, and persist the assistant message."""
+    model = st.session_state.model
+    reply = ""
+    image = None
+    image_rel = None
+    draw_prompt = ""
+    image_error = None
+
+    try:
+        with st.spinner("Writing the scene…"):
+            reply = write_story_scene(chat, model, opening=opening)
+    except Exception as e:
+        fail = (
+            f"Could not write the scene: {e}\n\n"
+            "Make sure Ollama is running, then try again."
+        )
+        with st.chat_message("assistant", avatar=chat_avatar("assistant")):
+            st.markdown(fail)
+        append_assistant_message(chat, fail)
+        persist()
+        st.rerun()
+
+    try:
+        with st.spinner("Illustrating the scene…"):
+            image, image_rel, draw_prompt, image_error = illustrate_scene(
+                chat, reply, model
+            )
+    except Exception as e:
+        image_error = e
+
+    content = reply
+    if image_error is not None:
+        content = f"{reply}\n\n*(Image generation failed: {image_error})*"
+
+    with st.chat_message("assistant", avatar=chat_avatar("assistant")):
+        if image is not None:
+            st.image(image, use_container_width=True)
+        st.markdown(content)
+
+    append_assistant_message(
+        chat,
+        content,
+        image=image_rel,
+        image_prompt=draw_prompt,
+    )
+    persist()
+    st.rerun()
+
 
 if prompt and active:
-    prior_messages = list(active["messages"])
+    story = ensure_story(active)
+    phase = story["phase"]
     active["messages"].append({"role": "user", "content": prompt})
-
-    # First prompt becomes the sidebar title
-    user_msgs = [m for m in active["messages"] if m["role"] == "user"]
-    if len(user_msgs) == 1:
-        set_chat_title(active, prompt)
-        for chat in st.session_state.chats:
-            if chat["id"] == active["id"]:
-                set_chat_title(chat, prompt)
-                break
 
     with st.chat_message("user", avatar=chat_avatar("user")):
         st.markdown(prompt)
 
-    # Jump to loading UI immediately after submit
     install_scroll_controls(force_bottom=True)
 
-    image_prompt = parse_image_prompt(prompt)
-    edit_prompt = parse_image_edit_prompt(prompt)
-    prev_image_msg = last_image_message(prior_messages)
-    prev_image_path = (
-        resolve_image_path(prev_image_msg["image"]) if prev_image_msg else None
-    )
-
-    # After an image: treat follow-ups as edits unless it's a new image or chat
-    followup_edit = (
-        prev_image_path is not None
-        and image_prompt is None
-        and not is_likely_chat(prompt)
-    )
-    if edit_prompt is None and followup_edit:
-        edit_prompt = prompt.strip()
-
-    if image_prompt is not None:
-        # e.g. "show a picture, and tell me a story…" → narrative + matching image
-        chat_part = (
-            chat_request_inside_image_prompt(image_prompt) if image_prompt else None
-        )
-        if chat_part:
-            # Keep the writing ask clear in history for later follow-ups,
-            # but preserve the original typed prompt for tooltips / titles.
-            active["messages"][-1]["original_content"] = prompt
-            active["messages"][-1]["content"] = chat_part
-            if len([m for m in active["messages"] if m["role"] == "user"]) == 1:
-                set_chat_title(active, prompt)
-                for chat in st.session_state.chats:
-                    if chat["id"] == active["id"]:
-                        set_chat_title(chat, prompt)
-                        break
-            reply = ""
-            image_rel = None
-            draw_prompt = ""
-            image = None
-            image_error = None
-
-            # Image first, then the narrative (matches "show a picture, and tell me…")
-            try:
-                with st.spinner("Illustrating the story…"):
-                    draw_prompt = scene_prompt_from_story(
-                        active["messages"],
-                        chat_part,
-                        st.session_state.model,
-                    )
-                    image = generate_image(
-                        draw_prompt,
-                        model_key=st.session_state.image_model,
-                    )
-                image_rel = save_generated_image(image, draw_prompt)
-            except Exception as e:
-                image_error = e
-
-            try:
-                with st.spinner("Writing…"):
-                    reply = chat_completion(
-                        active["messages"], st.session_state.model
-                    )
-            except Exception as e:
-                fail = (
-                    f"Could not complete the request: {e}\n\n"
-                    "Make sure Ollama is running, then try again."
-                )
-                with st.chat_message("assistant", avatar=chat_avatar("assistant")):
-                    if image is not None:
-                        st.image(image, use_container_width=True)
-                    st.markdown(fail)
-                msg: dict = {"role": "assistant", "content": fail}
-                if image_rel is not None:
-                    msg["image"] = image_rel
-                    msg["image_prompt"] = draw_prompt
-                active["messages"].append(msg)
-                persist()
-                st.rerun()
-
-            content = reply
-            if image_error is not None:
-                content = f"{reply}\n\n*(Image generation failed: {image_error})*"
-
-            with st.chat_message("assistant", avatar=chat_avatar("assistant")):
-                if image is not None:
-                    st.image(image, use_container_width=True)
-                st.markdown(content)
-
-            msg = {"role": "assistant", "content": content}
-            if image_rel is not None:
-                msg["image"] = image_rel
-                msg["image_prompt"] = draw_prompt
-            active["messages"].append(msg)
-            persist()
-            st.rerun()
-
-        if not image_prompt:
-            reply = (
-                "Say what to draw, e.g. `show me a dolphin` "
-                "or `/image a dolphin jumping`"
-            )
-            with st.chat_message("assistant", avatar=chat_avatar("assistant")):
-                st.markdown(reply)
-            active["messages"].append({"role": "assistant", "content": reply})
-        else:
-            draw_prompt = image_prompt
-            # "show a picture of the story" → expand using prior turns in this chat
-            if is_referential_image_prompt(image_prompt) and len(prior_messages) > 0:
-                try:
-                    with st.spinner("Using chat history for the image…"):
-                        draw_prompt = expand_image_prompt_from_history(
-                            active["messages"],
-                            image_prompt,
-                            st.session_state.model,
-                        )
-                except Exception:
-                    draw_prompt = image_prompt
-            try:
-                with st.chat_message("assistant", avatar=chat_avatar("assistant")):
-                    with st.spinner("Generating image…"):
-                        image = generate_image(
-                            draw_prompt,
-                            model_key=st.session_state.image_model,
-                        )
-                    image_rel = save_generated_image(image, draw_prompt)
-                    caption = f"Generated for: *{draw_prompt}*"
-                    st.markdown(caption)
-                    st.image(image, use_container_width=True)
-                active["messages"].append(
-                    {
-                        "role": "assistant",
-                        "content": caption,
-                        "image": image_rel,
-                        "image_prompt": draw_prompt,
-                    }
-                )
-            except Exception as e:
-                reply = f"Image generation failed: {e}"
-                with st.chat_message("assistant", avatar=chat_avatar("assistant")):
-                    st.markdown(reply)
-                active["messages"].append({"role": "assistant", "content": reply})
-        persist()
-        st.rerun()
-
-    if edit_prompt is not None and prev_image_path is not None:
-        try:
-            base_prompt = (prev_image_msg or {}).get("image_prompt") or ""
-            if base_prompt:
-                full_prompt = f"{base_prompt}, {edit_prompt}"
-            else:
-                full_prompt = edit_prompt
-
-            with st.chat_message("assistant", avatar=chat_avatar("assistant")):
-                with st.spinner("Updating image…"):
-                    init = PILImage.open(prev_image_path)
-                    image = edit_image(
-                        full_prompt,
-                        init,
-                        model_key=st.session_state.image_model,
-                    )
-                image_rel = save_generated_image(image, full_prompt)
-                caption = f"Updated image: *{edit_prompt}*"
-                st.markdown(caption)
-                st.image(image, use_container_width=True)
-            active["messages"].append(
-                {
-                    "role": "assistant",
-                    "content": caption,
-                    "image": image_rel,
-                    "image_prompt": full_prompt,
-                }
-            )
-        except Exception as e:
-            reply = f"Image edit failed: {e}"
-            with st.chat_message("assistant", avatar=chat_avatar("assistant")):
-                st.markdown(reply)
-            active["messages"].append({"role": "assistant", "content": reply})
-        persist()
-        st.rerun()
-
-    if edit_prompt is not None and prev_image_path is None:
-        reply = (
-            "No previous image to edit. Create one first, e.g. "
-            "`show me a dolphin`, then try `make it jumping`."
-        )
+    if phase == "premise":
+        story["premise"] = prompt.strip()
+        story["phase"] = "appearances"
+        sync_chat_title(active, prompt)
         with st.chat_message("assistant", avatar=chat_avatar("assistant")):
-            st.markdown(reply)
-        active["messages"].append({"role": "assistant", "content": reply})
+            st.markdown(APPEARANCES_ASK)
+        append_assistant_message(active, APPEARANCES_ASK)
         persist()
         st.rerun()
-
-    def stream_reply():
-        # Full prior turns in this chat (plus system prompt) go to the model
-        try:
-            stream = ollama.chat(
-                model=st.session_state.model,
-                messages=ollama_messages(active["messages"]),
-                stream=True,
-            )
-            for chunk in stream:
-                token = chunk.message.content
-                if token:
-                    yield token
-        except Exception as e:
-            yield (
-                f"Could not reach Ollama: {e}\n\n"
-                "Make sure Ollama is running, then try again."
-            )
-
-    with st.chat_message("assistant", avatar=chat_avatar("assistant")):
-        reply = st.write_stream(stream_reply())
-
-    active["messages"].append({"role": "assistant", "content": reply})
-    persist()
-    st.rerun()
+    elif phase == "appearances":
+        story["appearances"] = prompt.strip()
+        story["phase"] = "start"
+        with st.chat_message("assistant", avatar=chat_avatar("assistant")):
+            st.markdown(START_ASK)
+        append_assistant_message(active, START_ASK)
+        persist()
+        st.rerun()
+    elif phase == "start":
+        story["start_point"] = prompt.strip()
+        story["phase"] = "writing"
+        _write_and_illustrate(active, opening=True)
+    else:
+        # writing — continue / redirect from where we left off
+        _write_and_illustrate(active, opening=False)
 
 else:
     # Idle view: keep jump-to-bottom control available

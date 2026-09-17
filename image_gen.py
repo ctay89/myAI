@@ -11,7 +11,7 @@ from diffusers import (
 )
 from PIL import Image
 
-DEFAULT_IMAGE_MODEL = "sd15"
+DEFAULT_IMAGE_MODEL = "realistic_vision"
 DEFAULT_STRENGTH = 0.65
 DEFAULT_SD15_NEGATIVE = (
     "blurry, low quality, deformed, extra fingers, watermark, text"
@@ -52,60 +52,22 @@ def _sd15(
     return cfg
 
 
-# Picker options: key -> config (SD 1.5 first = default)
+# Picker options: key -> config
 IMAGE_MODELS: dict[str, dict] = {
-    "sd15": _sd15(
-        "SD 1.5 (Default)",
-        "stable-diffusion-v1-5/stable-diffusion-v1-5",
-        style="Default",
-    ),
     "realistic_vision": _sd15(
-        "Realistic Vision (Photorealism & Real-World Photography)",
+        "Realistic Vision (Photo Realism)",
         "SG161222/Realistic_Vision_V5.1_noVAE",
         style="Photo Realism",
         vae=SD15_VAE_MSE,
     ),
-    "epicrealism": _sd15(
-        "epiCRealism (Photorealism & Real-World Photography)",
-        "emilianJR/epiCRealism",
-        style="Photo Realism",
-    ),
-    "photon": _sd15(
-        "Photon (Photorealism & Real-World Photography)",
-        "digiplay/Photon_v1",
-        style="Photo Realism",
-    ),
     "dreamshaper8": _sd15(
-        "DreamShaper 8 (Illustrative, Semi-Realism, & 2.5D)",
+        "Dreamshaper 8 (Illustrations)",
         "Lykon/dreamshaper-8",
         style="Illustrations",
     ),
-    "rev_animated": _sd15(
-        "Rev Animated (Illustrative, Semi-Realism, & 2.5D)",
-        "philz1337x/revanimated",
-        style="Illustrations",
-        negative_prompt=DEFAULT_ANIME_NEGATIVE,
-    ),
-    "deliberate": _sd15(
-        "Deliberate (Illustrative, Semi-Realism, & 2.5D)",
-        "stablediffusionapi/deliberate-v2",
-        style="Illustrations",
-    ),
     "anything_v5": _sd15(
-        "Anything V5 (Anime, Manga, & Stylized Art)",
+        "Anything V5 (Manga & Anime)",
         "genai-archive/anything-v5",
-        style="Manga & Anime",
-        negative_prompt=DEFAULT_ANIME_NEGATIVE,
-    ),
-    "ghostmix": _sd15(
-        "GhostMix (Anime, Manga, & Stylized Art)",
-        "digiplay/GhostMix",
-        style="Manga & Anime",
-        negative_prompt=DEFAULT_ANIME_NEGATIVE,
-    ),
-    "counterfeit_v3": _sd15(
-        "Counterfeit V3 (Anime, Manga, & Stylized Art)",
-        "stablediffusionapi/counterfeit-v30",
         style="Manga & Anime",
         negative_prompt=DEFAULT_ANIME_NEGATIVE,
     ),

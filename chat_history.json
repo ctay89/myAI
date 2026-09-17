@@ -3,7 +3,14 @@
     {
       "id": "6898534d-bc82-4476-80c0-81d07f7056d3",
       "title": "New Chat",
-      "messages": []
+      "messages": [],
+      "story": {
+        "phase": "premise",
+        "premise": "",
+        "appearances": "",
+        "start_point": ""
+      },
+      "title_full": "New Chat"
     }
   ],
   "active_id": "6898534d-bc82-4476-80c0-81d07f7056d3"
