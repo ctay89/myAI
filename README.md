@@ -115,9 +115,9 @@ Open the URL Streamlit prints (usually http://localhost:8501).
 - chat_history.json - Local chat store (starts empty)
 - generated/ - Output images (created at runtime; not in git)
 - 
-equirements.txt - Chat / core Python deps
+requirements.txt - Chat / core Python deps
 - 
-equirements-image.txt - Extra deps for local image generation (install PyTorch separately)
+requirements-image.txt - Extra deps for local image generation (install PyTorch separately)
 
 ## Troubleshooting
 
