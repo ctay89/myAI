@@ -1,9 +1,12 @@
 {
-  "model": "dolphin-mistral:latest",
-  "image_model": "realistic_vision",
+  "model": "dolphin-mistral",
+  "image_model": "dreamshaper8",
   "models": [
-    "dolphin-llama3:latest",
     "dolphin-mistral:latest",
+    "dolphin-llama3:latest",
     "wizard-vicuna-uncensored:latest"
-  ]
+  ],
+  "paragraph_range": "3-5",
+  "background": "urban",
+  "user_avatar": "male_35"
 }

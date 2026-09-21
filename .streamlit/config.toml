@@ -1,0 +1,3 @@
+[client]
+# Page links live in the top navigation (st.navigation position="top")
+showSidebarNavigation = false
