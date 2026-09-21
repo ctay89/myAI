@@ -26,7 +26,7 @@ the game. Well, with AI, you can be a much bigger part of the story.
 
 Start wherever you want — characters, setting, basic story — and let AI fill in
 the blanks. Then it will ask you for input to carry the story forward.
-<u>What do you do?</u> You are involved!
+<u>What happens next?</u> You are involved!
 
 So join in on the action, drama, comedy, or whatever you're looking for,
 because the story is yours. Have as much fun with it as you want.

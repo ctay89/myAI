@@ -26,6 +26,7 @@ from preferences import (
     match_available_model,
     paragraph_range_label,
     resolve_image_model,
+    resolve_preferred_auto_generate_images,
     resolve_preferred_model,
     resolve_preferred_paragraph_range,
     save_settings,
@@ -393,11 +394,11 @@ def base_system_prompt() -> str:
         "appearances, and prior scenes. When continuing, pick up exactly where the "
         "last scene left off and weave in the user's new direction. Write only story "
         "prose — no titles, preambles, or meta commentary. End every scene with the "
-        "exact line: What do you do?"
+        "exact line: What happens next?"
     )
 
 
-SCENE_CHOICE_PROMPT = "What do you do?"
+SCENE_CHOICE_PROMPT = "What happens next?"
 
 
 def with_scene_choice_prompt(text: str) -> str:
@@ -513,13 +514,13 @@ def write_story_scene(chat: dict, model: str, *, opening: bool) -> str:
         nudge = (
             f"Write the opening scene now in exactly {paragraphs} paragraphs, starting from "
             "the opening start point. Only story prose, then end with the exact "
-            "line: What do you do?"
+            "line: What happens next?"
         )
     else:
         nudge = (
             f"Continue from where the last scene ended in exactly {paragraphs} paragraphs, "
             "following my latest direction. Only story prose, then end with the "
-            "exact line: What do you do?"
+            "exact line: What happens next?"
         )
     # Ephemeral writing instruction — not stored in chat history
     msgs = list(chat["messages"]) + [{"role": "user", "content": nudge}]
@@ -1907,6 +1908,8 @@ with st.sidebar:
         story_model_label = display_model_name(st.session_state.model)
         image_label = image_model_label(st.session_state.image_model)
         image_style = image_model_style(st.session_state.image_model)
+        auto_images = resolve_preferred_auto_generate_images()
+        auto_images_label = "On" if auto_images else "Off"
         st.markdown('<p class="nav-label">Story model</p>', unsafe_allow_html=True)
         st.markdown(
             f'<p class="nav-model-readonly">{html.escape(story_model_label)}</p>',
@@ -1917,6 +1920,14 @@ with st.sidebar:
             f'<p class="nav-model-readonly">{html.escape(image_label)}</p>'
             f'<p class="nav-model-style">IMAGE MODEL TYPE: '
             f"{html.escape(image_style)}</p>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<p class="nav-label">Generate image per prompt</p>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f'<p class="nav-model-readonly">{html.escape(auto_images_label)}</p>',
             unsafe_allow_html=True,
         )
 
@@ -1955,13 +1966,14 @@ def _write_and_illustrate(chat: dict, *, opening: bool) -> None:
         persist()
         st.rerun()
 
-    try:
-        with st.spinner("Illustrating the scene…"):
-            image, image_rel, draw_prompt, image_error = illustrate_scene(
-                chat, reply, model
-            )
-    except Exception as e:
-        image_error = e
+    if resolve_preferred_auto_generate_images():
+        try:
+            with st.spinner("Illustrating the scene…"):
+                image, image_rel, draw_prompt, image_error = illustrate_scene(
+                    chat, reply, model
+                )
+        except Exception as e:
+            image_error = e
 
     content = with_scene_choice_prompt(reply)
     if image_error is not None:

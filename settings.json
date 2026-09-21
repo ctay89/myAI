@@ -1,12 +1,13 @@
 {
   "model": "dolphin-mistral",
-  "image_model": "dreamshaper8",
+  "image_model": "realistic_vision",
   "models": [
     "dolphin-mistral:latest",
     "dolphin-llama3:latest",
     "wizard-vicuna-uncensored:latest"
   ],
   "paragraph_range": "3-5",
-  "background": "urban",
-  "user_avatar": "male_35"
+  "background": "sci_fi",
+  "user_avatar": "male_35",
+  "auto_generate_images": true
 }

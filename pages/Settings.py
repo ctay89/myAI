@@ -25,11 +25,13 @@ from preferences import (
     match_available_model,
     paragraph_range_label,
     resolve_image_model,
+    resolve_preferred_auto_generate_images,
     resolve_preferred_background,
     resolve_preferred_image_model,
     resolve_preferred_model,
     resolve_preferred_paragraph_range,
     resolve_preferred_user_avatar,
+    set_preferred_auto_generate_images,
     set_preferred_background,
     set_preferred_image_model,
     set_preferred_model,
@@ -83,6 +85,17 @@ st.markdown(
         text-transform: uppercase !important;
         line-height: 1.2 !important;
     }
+    .settings-kicker-section {
+        margin: 1.15rem 0 0.65rem 0 !important;
+        padding-top: 0.95rem !important;
+        border-top: 1px solid rgba(13, 138, 154, 0.22) !important;
+    }
+    .settings-subgroup-rule {
+        margin: 0.65rem 0 0.35rem 0 !important;
+        border: none !important;
+        border-top: 1px solid rgba(13, 138, 154, 0.14) !important;
+        height: 0 !important;
+    }
     .settings-field-label {
         margin: 0.45rem 0 0 !important;
         color: #1a2b32 !important;
@@ -97,6 +110,38 @@ st.markdown(
         font-size: 0.8rem !important;
         font-style: italic !important;
         line-height: 1.3 !important;
+    }
+    /* Teal toggle (replace Streamlit's default red) */
+    [class*="st-key-settings_page_auto_generate_images"],
+    .st-key-settings_page_auto_generate_images {
+        margin-top: 0.35rem !important;
+    }
+    [class*="st-key-settings_page_auto_generate_images"] [data-testid="stCheckbox"],
+    .st-key-settings_page_auto_generate_images [data-testid="stCheckbox"],
+    [class*="st-key-settings_page_auto_generate_images"] [data-testid="stWidgetLabel"],
+    .st-key-settings_page_auto_generate_images [data-testid="stWidgetLabel"] {
+        margin: 0 !important;
+    }
+    [class*="st-key-settings_page_auto_generate_images"] [data-baseweb="checkbox"] > div,
+    .st-key-settings_page_auto_generate_images [data-baseweb="checkbox"] > div,
+    [class*="st-key-settings_page_auto_generate_images"] label[data-baseweb="checkbox"] > div:first-child,
+    .st-key-settings_page_auto_generate_images label[data-baseweb="checkbox"] > div:first-child {
+        background-color: #b7cdd3 !important;
+    }
+    [class*="st-key-settings_page_auto_generate_images"] [data-baseweb="checkbox"][aria-checked="true"] > div,
+    .st-key-settings_page_auto_generate_images [data-baseweb="checkbox"][aria-checked="true"] > div,
+    [class*="st-key-settings_page_auto_generate_images"] [data-baseweb="checkbox"][data-checked="true"] > div,
+    .st-key-settings_page_auto_generate_images [data-baseweb="checkbox"][data-checked="true"] > div,
+    [class*="st-key-settings_page_auto_generate_images"] label[data-baseweb="checkbox"][data-checked="true"] > div,
+    .st-key-settings_page_auto_generate_images label[data-baseweb="checkbox"][data-checked="true"] > div,
+    [class*="st-key-settings_page_auto_generate_images"] label[data-baseweb="checkbox"] > div[data-checked="true"],
+    .st-key-settings_page_auto_generate_images label[data-baseweb="checkbox"] > div[data-checked="true"],
+    [class*="st-key-settings_page_auto_generate_images"] input:checked + div,
+    .st-key-settings_page_auto_generate_images input:checked + div,
+    [class*="st-key-settings_page_auto_generate_images"] [aria-checked="true"] > div:first-child,
+    .st-key-settings_page_auto_generate_images [aria-checked="true"] > div:first-child {
+        background-color: #0d8a9a !important;
+        background-image: none !important;
     }
     [class*="st-key-settings_form"] [data-baseweb="select"] > div,
     .st-key-settings_form [data-baseweb="select"] > div {
@@ -136,6 +181,12 @@ st.markdown(
         border-radius: 0.55rem !important;
     }
     /* Avatar buttons: image is the button itself */
+    [class*="st-key-avatar_wrap_"],
+    [class*="st-key-avatar_pick_btn_"] {
+        max-width: 62% !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+    }
     [class*="st-key-avatar_pick_btn_"] [data-testid="stBaseButton-secondary"],
     [class*="st-key-avatar_pick_btn_"] [data-testid="stBaseButton-primary"],
     [class*="st-key-avatar_pick_btn_"] button {
@@ -186,6 +237,10 @@ if "settings_image_model" not in st.session_state:
     st.session_state.settings_image_model = resolve_preferred_image_model()
 if "settings_paragraph_range" not in st.session_state:
     st.session_state.settings_paragraph_range = resolve_preferred_paragraph_range()
+if "settings_auto_generate_images" not in st.session_state:
+    st.session_state.settings_auto_generate_images = (
+        resolve_preferred_auto_generate_images()
+    )
 if "settings_background" not in st.session_state:
     st.session_state.settings_background = resolve_preferred_background()
 if "settings_user_avatar" not in st.session_state:
@@ -259,6 +314,22 @@ with form:
     lab, ctl = st.columns([0.34, 0.66], gap="small")
     with lab:
         st.markdown(
+            '<p class="settings-field-label">Paragraphs per prompt</p>',
+            unsafe_allow_html=True,
+        )
+    with ctl:
+        range_choice = st.selectbox(
+            "Paragraphs per prompt",
+            PARAGRAPH_RANGE_OPTIONS,
+            index=range_index,
+            format_func=paragraph_range_label,
+            label_visibility="collapsed",
+            key="settings_page_paragraph_range",
+        )
+
+    lab, ctl = st.columns([0.34, 0.66], gap="small")
+    with lab:
+        st.markdown(
             '<p class="settings-field-label">Image model</p>',
             unsafe_allow_html=True,
         )
@@ -280,22 +351,22 @@ with form:
     lab, ctl = st.columns([0.34, 0.66], gap="small")
     with lab:
         st.markdown(
-            '<p class="settings-field-label">Paragraphs per prompt</p>',
+            '<p class="settings-field-label">Generate image per prompt</p>',
             unsafe_allow_html=True,
         )
     with ctl:
-        range_choice = st.selectbox(
-            "Paragraphs per prompt",
-            PARAGRAPH_RANGE_OPTIONS,
-            index=range_index,
-            format_func=paragraph_range_label,
+        if "settings_page_auto_generate_images" not in st.session_state:
+            st.session_state.settings_page_auto_generate_images = (
+                st.session_state.settings_auto_generate_images
+            )
+        auto_images_choice = st.toggle(
+            "Generate image per prompt",
             label_visibility="collapsed",
-            key="settings_page_paragraph_range",
+            key="settings_page_auto_generate_images",
         )
 
     st.markdown(
-        '<p class="settings-kicker" style="margin-top: 1rem !important;">'
-        "Appearance</p>",
+        '<p class="settings-kicker settings-kicker-section">Appearance</p>',
         unsafe_allow_html=True,
     )
 
@@ -409,6 +480,10 @@ if image_choice != st.session_state.settings_image_model:
 if range_choice != st.session_state.settings_paragraph_range:
     st.session_state.settings_paragraph_range = range_choice
     set_preferred_paragraph_range(range_choice)
+
+if auto_images_choice != st.session_state.settings_auto_generate_images:
+    st.session_state.settings_auto_generate_images = auto_images_choice
+    set_preferred_auto_generate_images(auto_images_choice)
 
 if avatar_choice != st.session_state.settings_user_avatar:
     st.session_state.settings_user_avatar = avatar_choice

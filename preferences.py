@@ -18,6 +18,7 @@ PRACTICAL_MODELS = [
 ]
 DEFAULT_PARAGRAPH_RANGE = "3-5"
 PARAGRAPH_RANGE_OPTIONS = ["2-4", "3-5", "4-6", "5-7", "8-10"]
+DEFAULT_AUTO_GENERATE_IMAGES = True
 DEFAULT_BACKGROUND = "forest"
 BACKGROUND_OPTIONS: dict[str, dict[str, str]] = {
     "forest": {
@@ -237,6 +238,21 @@ def set_preferred_paragraph_range(range_key: str) -> None:
         key = DEFAULT_PARAGRAPH_RANGE
     settings = load_settings()
     settings["paragraph_range"] = key
+    save_settings(settings)
+
+
+def resolve_preferred_auto_generate_images() -> bool:
+    """Whether each story prompt should auto-generate an illustration."""
+    settings = load_settings()
+    if "auto_generate_images" not in settings:
+        return DEFAULT_AUTO_GENERATE_IMAGES
+    return bool(settings.get("auto_generate_images"))
+
+
+def set_preferred_auto_generate_images(enabled: bool) -> None:
+    """Persist auto-illustrate-each-prompt preference."""
+    settings = load_settings()
+    settings["auto_generate_images"] = bool(enabled)
     save_settings(settings)
 
 

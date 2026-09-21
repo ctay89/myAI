@@ -57,6 +57,7 @@ def render_brand_sidebar(
                 image_model_style,
                 list_ollama_models,
                 resolve_image_model,
+                resolve_preferred_auto_generate_images,
                 resolve_preferred_image_model,
                 resolve_preferred_model,
             )
@@ -70,6 +71,9 @@ def render_brand_sidebar(
             story_model_label = display_model_name(st.session_state.model)
             image_label = image_model_label(st.session_state.image_model)
             image_style = image_model_style(st.session_state.image_model)
+            auto_images_label = (
+                "On" if resolve_preferred_auto_generate_images() else "Off"
+            )
             st.markdown('<p class="nav-label">Story model</p>', unsafe_allow_html=True)
             st.markdown(
                 f'<p class="nav-model-readonly">{html.escape(story_model_label)}</p>',
@@ -80,6 +84,14 @@ def render_brand_sidebar(
                 f'<p class="nav-model-readonly">{html.escape(image_label)}</p>'
                 f'<p class="nav-model-style">IMAGE MODEL TYPE: '
                 f"{html.escape(image_style)}</p>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                '<p class="nav-label">Generate image per prompt</p>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f'<p class="nav-model-readonly">{html.escape(auto_images_label)}</p>',
                 unsafe_allow_html=True,
             )
 
