@@ -13,8 +13,6 @@ import streamlit.components.v1 as components
 import image_gen as _image_gen
 from header_nav import apply_forest_background
 from preferences import (
-    DEFAULT_IMAGE_MODEL,
-    DEFAULT_MODEL,
     PRACTICAL_MODELS,
     dedupe_models as _dedupe_models,
     display_model_name,
@@ -22,15 +20,13 @@ from preferences import (
     image_model_label,
     image_model_style,
     list_ollama_models,
-    load_settings,
     match_available_model,
     paragraph_range_label,
     resolve_image_model,
     resolve_preferred_auto_generate_images,
+    resolve_preferred_image_model,
     resolve_preferred_model,
     resolve_preferred_paragraph_range,
-    save_settings,
-    set_preferred_image_model,
     set_preferred_model,
 )
 
@@ -63,7 +59,6 @@ START_ASK = (
 )
 
 HISTORY_FILE = Path(__file__).parent / "chat_history.json"
-SETTINGS_FILE = Path(__file__).parent / "settings.json"
 IMAGE_DIR = Path(__file__).parent / "generated"
 ASSETS_DIR = Path(__file__).parent / "assets"
 AVATAR_USER = ASSETS_DIR / "avatar_user.png"
@@ -330,10 +325,18 @@ def delete_chat(chat_id: str) -> None:
     persist()
 
 
+def clear_generated_images() -> None:
+    """Remove generated/ entirely, then recreate the empty folder."""
+    import shutil
+
+    if IMAGE_DIR.exists():
+        shutil.rmtree(IMAGE_DIR, ignore_errors=True)
+    IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+
 def clear_all_chats() -> None:
-    """Delete every chat and its generated images, then start a fresh chat."""
-    for chat in list(st.session_state.chats):
-        delete_chat_images(chat)
+    """Delete every chat and wipe generated/, then start a fresh chat."""
+    clear_generated_images()
     new_chat = _new_chat()
     st.session_state.chats = [new_chat]
     st.session_state.active_id = new_chat["id"]
@@ -1814,20 +1817,13 @@ if "chats_visible" not in st.session_state:
 available_models = list_ollama_models()
 if "model" not in st.session_state:
     st.session_state.model = resolve_preferred_model(available_models)
-    # Seed settings file if missing so the choice sticks
-    if not load_settings().get("model"):
-        set_preferred_model(st.session_state.model)
 elif st.session_state.model not in available_models and available_models:
     match = match_available_model(st.session_state.model, available_models)
     st.session_state.model = match or available_models[0]
     set_preferred_model(st.session_state.model)
 
 if "image_model" not in st.session_state:
-    st.session_state.image_model = resolve_image_model(
-        load_settings().get("image_model") or DEFAULT_IMAGE_MODEL
-    )
-    if not load_settings().get("image_model"):
-        set_preferred_image_model(st.session_state.image_model)
+    st.session_state.image_model = resolve_preferred_image_model()
 else:
     st.session_state.image_model = resolve_image_model(st.session_state.image_model)
 
@@ -1835,13 +1831,12 @@ else:
 if st.session_state.get("confirm_clear"):
     show_clear_history_confirmation()
 
-history_path = str(HISTORY_FILE.resolve())
-
 with st.sidebar:
     if st.button(
         "＋ START NEW STORY",
         key="nav_new_chat",
         use_container_width=True,
+        help="Start New Story",
     ):
         chat = _new_chat()
         st.session_state.chats.insert(0, chat)
@@ -1889,7 +1884,7 @@ with st.sidebar:
         "CLEAR STORY HISTORY",
         key="nav_clear_history",
         use_container_width=True,
-        help=history_path,
+        help="Clear Story History",
     ):
         st.session_state.confirm_clear = True
         st.rerun()

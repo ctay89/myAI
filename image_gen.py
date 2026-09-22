@@ -3,13 +3,6 @@
 from __future__ import annotations
 
 import streamlit as st
-import torch
-from diffusers import (
-    AutoencoderKL,
-    AutoPipelineForImage2Image,
-    StableDiffusionPipeline,
-)
-from PIL import Image
 
 DEFAULT_IMAGE_MODEL = "realistic_vision"
 DEFAULT_STRENGTH = 0.65
@@ -110,6 +103,8 @@ def _negative_for(key: str, negative_prompt: str = "") -> str | None:
 
 def clear_image_pipelines() -> None:
     """Drop cached pipelines so switching models frees VRAM."""
+    import torch
+
     try:
         get_txt2img_pipeline.clear()
     except Exception:
@@ -123,6 +118,8 @@ def clear_image_pipelines() -> None:
 
 
 def _device_dtype():
+    import torch
+
     if torch.cuda.is_available():
         return "cuda", torch.float16
     return "cpu", torch.float32
@@ -146,6 +143,8 @@ def _configure_pipe(pipe):
 
 
 def _load_sd15(key: str, dtype):
+    from diffusers import AutoencoderKL, StableDiffusionPipeline
+
     cfg = IMAGE_MODELS[key]
     kwargs: dict = {
         "torch_dtype": dtype,
@@ -174,10 +173,14 @@ def get_txt2img_pipeline(model_key: str):
 
 @st.cache_resource(show_spinner="Loading image-edit pipeline…")
 def get_img2img_pipeline(model_key: str):
+    from diffusers import AutoPipelineForImage2Image
+
     return AutoPipelineForImage2Image.from_pipe(get_txt2img_pipeline(model_key))
 
 
 def _generator(seed: int | None):
+    import torch
+
     if seed is None:
         return None
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -194,7 +197,7 @@ def generate_image(
     width: int | None = None,
     height: int | None = None,
     seed: int | None = None,
-) -> Image.Image:
+):
     """Generate a PIL image from a text prompt using the selected model."""
     prompt = (prompt or "").strip()
     if not prompt:
@@ -223,7 +226,7 @@ def generate_image(
 
 def edit_image(
     prompt: str,
-    init_image: Image.Image,
+    init_image,
     *,
     model_key: str = DEFAULT_IMAGE_MODEL,
     negative_prompt: str = "",
@@ -231,8 +234,10 @@ def edit_image(
     guidance_scale: float | None = None,
     strength: float | None = None,
     seed: int | None = None,
-) -> Image.Image:
+):
     """Regenerate from a previous image + edit prompt (img2img)."""
+    from PIL import Image
+
     prompt = (prompt or "").strip()
     if not prompt:
         raise ValueError("Edit prompt must not be empty.")

@@ -4,6 +4,8 @@ from pathlib import Path
 
 import streamlit as st
 
+from preferences import ensure_prefs_hydrated
+
 ASSETS_DIR = Path(__file__).parent / "assets"
 ICON_FILE = ASSETS_DIR / "mascot_book.png"
 if not ICON_FILE.exists():
@@ -15,6 +17,9 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Load per-browser settings from localStorage into this session.
+ensure_prefs_hydrated()
 
 pages = [
     st.Page("home.py", title="Stories", default=True),

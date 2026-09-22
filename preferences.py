@@ -1,12 +1,18 @@
-"""Shared model preference load/save for Stories + Settings pages."""
+"""Shared model preference load/save for Stories + Settings pages.
+
+User prefs are stored per browser (cookie + localStorage) and mirrored into
+``st.session_state`` for the active Streamlit session. Each machine and
+browser keeps its own settings.
+"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import unquote
 
 import ollama
-import streamlit.components.v1 as components
+import streamlit as st
 
 import image_gen as _image_gen
 
@@ -65,7 +71,21 @@ USER_AVATAR_OPTIONS: dict[str, dict[str, str]] = {
         "file": "avatar_user_female_55.png",
     },
 }
-SETTINGS_FILE = Path(__file__).parent / "settings.json"
+
+# Legacy shared file — read once to seed browser prefs on upgrade; never written.
+_LEGACY_SETTINGS_FILE = Path(__file__).parent / "settings.json"
+_LOCAL_STORAGE_KEY = "yourStoriesAI_settings"
+_COOKIE_NAME = "yourStoriesAI_settings"
+_SESSION_PREFS_KEY = "_user_prefs"
+_HYDRATED_KEY = "_prefs_hydrated"
+_USER_PREF_KEYS = (
+    "model",
+    "image_model",
+    "paragraph_range",
+    "auto_generate_images",
+    "background",
+    "user_avatar",
+)
 
 clear_image_pipelines = _image_gen.clear_image_pipelines
 resolve_image_model = _image_gen.resolve_image_model
@@ -94,28 +114,171 @@ def dedupe_models(names: list[str]) -> list[str]:
     return list(by_key.values())
 
 
+def _default_prefs() -> dict:
+    return {
+        "model": DEFAULT_MODEL,
+        "image_model": DEFAULT_IMAGE_MODEL,
+        "paragraph_range": DEFAULT_PARAGRAPH_RANGE,
+        "auto_generate_images": DEFAULT_AUTO_GENERATE_IMAGES,
+        "background": DEFAULT_BACKGROUND,
+        "user_avatar": DEFAULT_USER_AVATAR,
+    }
+
+
+def _legacy_file_prefs() -> dict:
+    """Optional one-time migration source from the old shared settings.json."""
+    if not _LEGACY_SETTINGS_FILE.exists():
+        return {}
+    try:
+        data = json.loads(_LEGACY_SETTINGS_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: data[k] for k in _USER_PREF_KEYS if k in data}
+
+
+def _normalize_prefs(raw: dict | None) -> dict:
+    prefs = _default_prefs()
+    if not isinstance(raw, dict):
+        return prefs
+
+    model = raw.get("model")
+    if model:
+        prefs["model"] = str(model)
+
+    if raw.get("image_model"):
+        prefs["image_model"] = resolve_image_model(str(raw["image_model"]))
+
+    range_key = str(raw.get("paragraph_range") or DEFAULT_PARAGRAPH_RANGE)
+    range_key = range_key.strip().replace("–", "-")
+    prefs["paragraph_range"] = (
+        range_key if range_key in PARAGRAPH_RANGE_OPTIONS else DEFAULT_PARAGRAPH_RANGE
+    )
+
+    if "auto_generate_images" in raw:
+        prefs["auto_generate_images"] = bool(raw.get("auto_generate_images"))
+
+    bg = str(raw.get("background") or DEFAULT_BACKGROUND).strip()
+    prefs["background"] = bg if bg in BACKGROUND_OPTIONS else DEFAULT_BACKGROUND
+
+    avatar = str(raw.get("user_avatar") or DEFAULT_USER_AVATAR).strip()
+    if avatar in {"male_youth", "boy"}:
+        avatar = "male_20"
+    elif avatar in {"female_youth", "girl"}:
+        avatar = "female_20"
+    prefs["user_avatar"] = (
+        avatar if avatar in USER_AVATAR_OPTIONS else DEFAULT_USER_AVATAR
+    )
+    return prefs
+
+
+def _read_cookie_prefs() -> dict | None:
+    try:
+        raw = st.context.cookies.get(_COOKIE_NAME)
+    except Exception:
+        return None
+    if not raw:
+        return None
+    try:
+        data = json.loads(unquote(str(raw)))
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _persist_browser_prefs(prefs: dict) -> None:
+    """Write prefs to cookie + localStorage (no page reload)."""
+    payload = json.dumps(prefs, ensure_ascii=False, separators=(",", ":"))
+    st.iframe(
+        f"""
+        <script>
+        (function () {{
+          const KEY = {json.dumps(_LOCAL_STORAGE_KEY)};
+          const COOKIE = {json.dumps(_COOKIE_NAME)};
+          const raw = {json.dumps(payload)};
+          try {{
+            const win = window.parent;
+            win.localStorage.setItem(KEY, raw);
+            const maxAge = 60 * 60 * 24 * 365;
+            win.document.cookie =
+              COOKIE + "=" + encodeURIComponent(raw) +
+              "; path=/; max-age=" + maxAge + "; SameSite=Lax";
+          }} catch (e) {{}}
+        }})();
+        </script>
+        """,
+        height=1,
+        width=1,
+    )
+
+
+def ensure_prefs_hydrated() -> None:
+    """Load per-browser prefs into session_state (once per session)."""
+    if st.session_state.get(_HYDRATED_KEY):
+        return
+
+    cookie_prefs = _read_cookie_prefs()
+    if cookie_prefs is not None:
+        prefs = _normalize_prefs(cookie_prefs)
+    else:
+        # First visit / no cookie yet: seed from legacy file defaults.
+        prefs = _normalize_prefs({**_default_prefs(), **_legacy_file_prefs()})
+        _persist_browser_prefs(prefs)
+
+    st.session_state[_SESSION_PREFS_KEY] = prefs
+    st.session_state[_HYDRATED_KEY] = True
+
+    # Soft-migrate older localStorage-only installs into the cookie (no reload).
+    st.iframe(
+        f"""
+        <script>
+        (function () {{
+          const KEY = {json.dumps(_LOCAL_STORAGE_KEY)};
+          const COOKIE = {json.dumps(_COOKIE_NAME)};
+          try {{
+            const win = window.parent;
+            const hasCookie = (win.document.cookie || "")
+              .split(";")
+              .some(function (part) {{
+                return part.trim().indexOf(COOKIE + "=") === 0;
+              }});
+            if (hasCookie) return;
+            const raw = win.localStorage.getItem(KEY);
+            if (!raw) return;
+            const maxAge = 60 * 60 * 24 * 365;
+            win.document.cookie =
+              COOKIE + "=" + encodeURIComponent(raw) +
+              "; path=/; max-age=" + maxAge + "; SameSite=Lax";
+          }} catch (e) {{}}
+        }})();
+        </script>
+        """,
+        height=1,
+        width=1,
+    )
+
+
 def load_settings() -> dict:
-    if SETTINGS_FILE.exists():
-        try:
-            data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                return data
-        except (json.JSONDecodeError, OSError):
-            pass
-    return {}
+    """Return current user prefs (session mirror of browser storage)."""
+    stored = st.session_state.get(_SESSION_PREFS_KEY)
+    if isinstance(stored, dict):
+        return dict(stored)
+    cookie_prefs = _read_cookie_prefs()
+    if cookie_prefs is not None:
+        return _normalize_prefs(cookie_prefs)
+    return _normalize_prefs(_legacy_file_prefs())
 
 
 def save_settings(settings: dict) -> None:
-    SETTINGS_FILE.write_text(
-        json.dumps(settings, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    """Persist user prefs to session state, cookie, and localStorage."""
+    prefs = _normalize_prefs(settings)
+    st.session_state[_SESSION_PREFS_KEY] = prefs
+    _persist_browser_prefs(prefs)
 
 
 def list_ollama_models() -> list[str]:
     """Return only the allowed chat models for the picker."""
-    settings = load_settings()
-    cached = [str(m) for m in (settings.get("models") or []) if m]
     allowed = {display_model_name(m).lower() for m in PRACTICAL_MODELS}
 
     live: list[str] = []
@@ -128,9 +291,8 @@ def list_ollama_models() -> list[str]:
     except Exception:
         live = []
 
-    source = live or cached or []
     by_key: dict[str, str] = {}
-    for name in source:
+    for name in live:
         key = display_model_name(name).lower()
         if key in allowed:
             by_key[key] = name
@@ -139,11 +301,6 @@ def list_ollama_models() -> list[str]:
         by_key.get(display_model_name(name).lower(), name)
         for name in PRACTICAL_MODELS
     ]
-
-    if live:
-        settings["models"] = ordered
-        save_settings(settings)
-
     return ordered or [DEFAULT_MODEL]
 
 
@@ -169,25 +326,14 @@ def resolve_preferred_model(available: list[str]) -> str:
     settings = load_settings()
     preferred = settings.get("model") or DEFAULT_MODEL
     matched = match_available_model(str(preferred), available)
-    return matched or available[0]
+    return matched or (available[0] if available else DEFAULT_MODEL)
 
 
 def set_preferred_model(model: str) -> None:
-    """Persist chat model choice locally (survives refresh / restart)."""
+    """Persist chat model choice in this browser (survives refresh)."""
     settings = load_settings()
     settings["model"] = model
     save_settings(settings)
-    components.html(
-        f"""
-        <script>
-        try {{
-          localStorage.setItem("yourStoriesAI_model", {json.dumps(model)});
-        }} catch (e) {{}}
-        </script>
-        """,
-        height=0,
-        width=0,
-    )
 
 
 def set_preferred_image_model(model_key: str) -> None:
@@ -197,17 +343,6 @@ def set_preferred_image_model(model_key: str) -> None:
     settings["image_model"] = key
     save_settings(settings)
     clear_image_pipelines()
-    components.html(
-        f"""
-        <script>
-        try {{
-          localStorage.setItem("yourStoriesAI_image_model", {json.dumps(key)});
-        }} catch (e) {{}}
-        </script>
-        """,
-        height=0,
-        width=0,
-    )
 
 
 def resolve_preferred_image_model() -> str:
@@ -309,7 +444,6 @@ def resolve_preferred_user_avatar() -> str:
     """Load saved user avatar preference; default Young man."""
     settings = load_settings()
     key = str(settings.get("user_avatar") or DEFAULT_USER_AVATAR).strip()
-    # Migrate removed youth options to the new adult defaults
     if key in {"male_youth", "boy"}:
         key = "male_20"
     elif key in {"female_youth", "girl"}:

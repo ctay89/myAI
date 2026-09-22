@@ -108,21 +108,21 @@ Open the URL Streamlit prints (usually http://localhost:8501).
 
 ## Project layout
 
-- pp.py - Streamlit UI, chat, image prompts, sidebar
+- app.py - Streamlit UI entrypoint (Stories / Settings / About)
+- home.py - Stories chat page
+- preferences.py - Per-browser settings (localStorage)
 - image_gen.py - Local SD pipelines
-- ssets/ - Logos and avatars
-- settings.json - Saved chat/image model preferences
+- assets/ - Logos and avatars
+- settings.json - Optional one-time migration seed (prefs now live in the browser)
 - chat_history.json - Local chat store (starts empty)
 - generated/ - Output images (created at runtime; not in git)
-- 
-requirements.txt - Chat / core Python deps
-- 
-requirements-image.txt - Extra deps for local image generation (install PyTorch separately)
+- requirements.txt - Chat / core Python deps
+- requirements-image.txt - Extra deps for local image generation (install PyTorch separately)
 
 ## Troubleshooting
 
 - **Chat errors / empty model list:** Ensure ollama serve is running and you have pulled at least one supported model (ollama list).
-- **Wrong model name in settings.json:** The app tries to match tags like :latest; if needed, pick a model again in the sidebar.
+- **Wrong model / settings not sticking:** Settings are stored per browser (cookie + localStorage key `yourStoriesAI_settings`). Pick again on the Settings page, or clear that cookie/key to reset to defaults.
 - **Image import / CUDA errors:** Install the Diffusers + PyTorch stack for your GPU; CPU-only Torch will run but may be very slow.
 - **First image is slow / large download:** Expected - the selected Hugging Face checkpoint downloads once and is cached locally.
 - **Stale UI after pulling code:** Hard-refresh the browser; restart streamlit run app.py.
@@ -131,5 +131,6 @@ requirements-image.txt - Extra deps for local image generation (install PyTorch 
 ## Notes for contributors
 
 - .venv/ and generated/ are gitignored - do not commit them.
-- settings.json and chat_history.json are local state; safe to keep empty/default when sharing.
+- Settings are per browser/machine (localStorage), not shared via settings.json.
+- chat_history.json is local server state; safe to keep empty/default when sharing.
 - myAI.iml is an IntelliJ/PyCharm module file and is not required to run the app.

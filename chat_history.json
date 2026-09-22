@@ -1,7 +1,7 @@
 {
   "chats": [
     {
-      "id": "dfe1cced-352d-45da-afa3-3f4aa6e381db",
+      "id": "94cdb222-db90-4d1f-b65c-f0ff4bf9b946",
       "title": "New Story",
       "messages": [],
       "story": {
@@ -12,5 +12,5 @@
       }
     }
   ],
-  "active_id": "dfe1cced-352d-45da-afa3-3f4aa6e381db"
+  "active_id": "94cdb222-db90-4d1f-b65c-f0ff4bf9b946"
 }

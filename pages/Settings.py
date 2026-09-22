@@ -44,8 +44,8 @@ from preferences import (
 
 render_brand_sidebar(
     message=(
-        "Here is the Settings page. You may adjust the story writing "
-        "settings here."
+        "Here is the Settings page. You may adjust the settings for a different story writing "
+        "experience here."
     )
 )
 apply_forest_background(include_chat_input=False)

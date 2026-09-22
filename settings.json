@@ -7,7 +7,7 @@
     "wizard-vicuna-uncensored:latest"
   ],
   "paragraph_range": "3-5",
-  "background": "sci_fi",
+  "background": "forest",
   "user_avatar": "male_35",
   "auto_generate_images": true
 }
